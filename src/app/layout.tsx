@@ -1,43 +1,61 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Nunito, Quicksand } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { AuthNav } from "@/components/auth-nav";
+import { SiteFooter } from "@/components/site-footer";
+import { siteConfig } from "@/config/site";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Títulos: geométrica y redondeada. Para h1/h2 y el nombre del local.
+const quicksand = Quicksand({
+  variable: "--font-quicksand",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+// Cuerpo, botones y formularios: terminaciones redondeadas
+const nunito = Nunito({
+  variable: "--font-nunito",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Turnos",
-  description: "Reservá y gestioná turnos online",
+  title: siteConfig.name,
+  description: siteConfig.description,
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <ClerkProvider>
+    <ClerkProvider
+      appearance={{
+        variables: {
+          colorPrimary: "#4f6f63",
+          colorForeground: "#2f2a26",
+          fontFamily: "var(--font-nunito)",
+        },
+      }}
+    >
       <html
         lang="es"
-        className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+        className={`${quicksand.variable} ${nunito.variable} h-full antialiased`}
       >
-        <body className="min-h-full flex flex-col">
-          <header className="flex items-center justify-between gap-4 border-b border-zinc-200 px-6 h-16 dark:border-zinc-800">
-            <Link href="/" className="font-semibold text-lg">
-              Turnos
-            </Link>
-            <Suspense>
-              <AuthNav />
-            </Suspense>
+        <body className="min-h-full flex flex-col font-sans">
+          <header className="border-b border-line bg-surface">
+            <div className="mx-auto flex h-16 max-w-5xl items-center justify-between gap-4 px-6">
+              <Link
+                href="/"
+                className="font-display text-xl leading-tight font-semibold text-foreground sm:text-2xl"
+              >
+                {siteConfig.name}
+              </Link>
+              <Suspense>
+                <AuthNav />
+              </Suspense>
+            </div>
           </header>
           {children}
+          <SiteFooter />
         </body>
       </html>
     </ClerkProvider>

@@ -9,3 +9,181 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// ------------------------------------------------------
+// ENUMS
+// ------------------------------------------------------
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum AppointmentStatus {
+  PENDING_PAYMENT // Esperando el pago en Mercado Pago; el horario queda reservado hasta `reservedUntil`
+  PENDING // Creado, pendiente de asistencia (ej. paga en el local)
+  CONFIRMED // Confirmado (ej. pagó por Mercado Pago)
+  COMPLETED // El admin marcó que el servicio se realizó
+  CANCELLED // Cancelado por el admin o el cliente
+  RESCHEDULED // Reprogramado
+  EXPIRED // No se pagó a tiempo; el horario se libera
+}
+
+enum PaymentMethod {
+  IN_STORE // Pago en el local
+  MERCADO_PAGO // Pago online (Checkout Pro)
+}
+
+// Estado simplificado del cobro. El estado exacto de Mercado Pago queda en `Payment.mpStatus`.
+enum PaymentStatus {
+  PENDING // MP: pending / authorized. Local: todavía no cobrado
+  IN_PROCESS // MP: in_process / in_mediation
+  PAID // MP: approved. Local: el admin registró el cobro
+  REJECTED // MP: rejected
+  CANCELLED // MP: cancelled, o preferencia vencida sin pago
+  REFUNDED // MP: refunded
+  CHARGED_BACK // MP: charged_back (contracargo)
+}
+
+enum WebhookProvider {
+  MERCADO_PAGO
+  CLERK
+}
+
+enum WebhookEventStatus {
+  RECEIVED // Guardado, todavía sin procesar
+  PROCESSED
+  IGNORED // Tipo de evento que no nos interesa
+  FAILED // Falló el procesamiento; ver `error`
+}
+
+// ------------------------------------------------------
+// MODELS
+// ------------------------------------------------------
+
+model User {
+  id        String  @id @default(uuid())
+  clerkId   String? @unique // Null para shadow accounts hasta que el usuario reclama la cuenta en Clerk
+  email     String  @unique
+  firstName String
+  lastName  String
+  phone     String?
+  role      Role    @default(USER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointments Appointment[]
+}
+
+model Service {
+  id          String  @id @default(uuid())
+  name        String
+  description String?
+  price       Decimal @db.Decimal(10, 2)
+  duration    Int // Duración en minutos (ej: 30, 60) útil para calcular disponibilidad
+  isActive    Boolean @default(true) // Para ocultar servicios sin borrarlos
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointments Appointment[]
+}
+
+model Appointment {
+  id      String            @id @default(uuid())
+  date    DateTime // Fecha y hora de inicio del turno
+  endDate DateTime // date + duración del servicio al reservar; simplifica la búsqueda de solapamientos
+  status  AppointmentStatus @default(PENDING)
+
+  // Solo para PENDING_PAYMENT: hasta cuándo se retiene el horario. Debe coincidir con el
+  // vencimiento de la preferencia de Mercado Pago (`Payment.expiresAt`).
+  reservedUntil DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id])
+
+  // Un turno puede tener varios intentos de cobro (ej. abandona Mercado Pago y termina pagando en el local)
+  payments Payment[]
+
+  @@index([date, endDate])
+  @@index([status, reservedUntil])
+  @@index([userId])
+}
+
+// Un intento de cobro de un turno. Para Mercado Pago corresponde a una preferencia de Checkout Pro;
+// `id` se envía como `external_reference` para ubicar el registro desde el webhook.
+model Payment {
+  id       String        @id @default(uuid())
+  method   PaymentMethod
+  status   PaymentStatus @default(PENDING)
+  amount   Decimal       @db.Decimal(10, 2) // Precio del servicio al momento de reservar
+  currency String        @default("ARS")
+  paidAt   DateTime?
+
+  // --- Mercado Pago (null para pagos en el local) ---
+  mpPreferenceId String?   @unique
+  mpInitPoint    String? // URL de checkout a la que se redirige al cliente
+  expiresAt      DateTime? // Vencimiento de la preferencia (`expiration_date_to`)
+
+  // Se completan desde el webhook consultando GET /v1/payments/{id}. Si hay varios intentos
+  // dentro de la misma preferencia (ej. rechazado y luego aprobado) queda el último relevante:
+  // no pisar un pago aprobado con una notificación tardía de otro rechazado.
+  mpPaymentId       String? @unique
+  mpStatus          String? // approved, rejected, in_process, refunded, ...
+  mpStatusDetail    String? // accredited, cc_rejected_insufficient_amount, ...
+  mpPaymentTypeId   String? // credit_card, debit_card, account_money, ticket, ...
+  mpPaymentMethodId String? // visa, master, ...
+  mpMerchantOrderId String?
+  mpPayment         Json? // Última respuesta completa de la API, para auditoría
+
+  refundedAmount Decimal?  @db.Decimal(10, 2)
+  refundedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id])
+
+  @@index([appointmentId])
+  @@index([status])
+}
+
+// Registro de webhooks recibidos (Mercado Pago y Clerk). Sirve para idempotencia —los proveedores
+// reintentan y pueden mandar el mismo evento más de una vez— y para auditar/reprocesar fallos.
+model WebhookEvent {
+  id         String             @id @default(uuid())
+  provider   WebhookProvider
+  externalId String // MP: `id` de la notificación. Clerk: header `svix-id`
+  type       String // MP: `type` (payment, merchant_order). Clerk: user.created, ...
+  action     String? // MP: `action` (payment.created, payment.updated)
+  resourceId String? // MP: `data.id` (id del pago). Clerk: id del usuario
+  payload    Json
+  status     WebhookEventStatus @default(RECEIVED)
+  error      String?
+
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  @@unique([provider, externalId])
+  @@index([provider, resourceId])
+}
+
+model BlockedSchedule {
+  id        String   @id @default(uuid())
+  startDate DateTime // Inicio de vacaciones/licencia
+  endDate   DateTime // Fin de vacaciones/licencia
+  reason    String? // Ej: "Vacaciones de verano"
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([startDate, endDate])
+}
