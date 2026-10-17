@@ -5,7 +5,12 @@ import { clerkClient } from "@clerk/nextjs/server";
 import type { User } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
-import { getAvailability, isSlotAvailable, type Availability } from "@/lib/availability";
+import {
+  getAvailability,
+  isSlotAvailable,
+  lockSchedule,
+  type Availability,
+} from "@/lib/availability";
 
 // Los argumentos de una Server Action llegan del navegador: se validan todos acá.
 
@@ -123,10 +128,6 @@ async function ensureClerkAccount(user: User) {
   }
 }
 
-// Clave fija del advisory lock que serializa las reservas: atiende una sola persona, así que
-// dos reservas simultáneas nunca pueden validar el mismo horario como libre.
-const BOOKING_LOCK_KEY = 4_815_162_342;
-
 // Reserva con pago en el local: turno en PENDING + Payment IN_STORE (sección 3.1, paso 4)
 export async function createInStoreBookingAction(input: BookingInput): Promise<BookingResult> {
   if (typeof input?.serviceId !== "string" || typeof input.start !== "string") {
@@ -146,7 +147,7 @@ export async function createInStoreBookingAction(input: BookingInput): Promise<B
   const { user } = resolved;
 
   const appointment = await prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${BOOKING_LOCK_KEY})`);
+    await lockSchedule(tx);
 
     if (!(await isSlotAvailable(tx, service.duration, start))) return null;
 

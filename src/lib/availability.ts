@@ -27,16 +27,41 @@ export function bookingWindow(now: Date): { minDate: DateKey; maxDate: DateKey }
   return { minDate, maxDate: addMonths(minDate, bookingConfig.maxMonthsAhead) };
 }
 
+// Estados que ocupan el horario (sección 6.2 de la doc). PENDING_PAYMENT se trata aparte.
+export const OCCUPYING_STATUSES = ["PENDING", "CONFIRMED", "RESCHEDULED", "COMPLETED"] as const;
+
+// Clave fija del advisory lock que serializa las reservas y reprogramaciones: atiende una sola
+// persona, así que dos operaciones simultáneas nunca pueden validar el mismo horario como libre.
+const SCHEDULE_LOCK_KEY = 4_815_162_342;
+
+// Llamar al principio de la transacción que valida y ocupa un horario
+export async function lockSchedule(tx: Db) {
+  await tx.$executeRawUnsafe(`SELECT pg_advisory_xact_lock(${SCHEDULE_LOCK_KEY})`);
+}
+
+type AvailabilityOptions = {
+  range?: { from: DateKey; to: DateKey };
+  // Al reprogramar, el turno que se mueve no debe bloquear su propio horario
+  excludeAppointmentId?: string;
+};
+
 // Intervalos [inicio, fin) en ms que ya no se pueden reservar entre `from` y `to`:
-// turnos que ocupan el horario (sección 6.2 de la doc) y bloqueos del admin.
-async function loadBusyIntervals(db: Db, from: Date, to: Date, now: Date) {
+// turnos que ocupan el horario y bloqueos del admin.
+async function loadBusyIntervals(
+  db: Db,
+  from: Date,
+  to: Date,
+  now: Date,
+  excludeAppointmentId?: string,
+) {
   const [appointments, blocks] = await Promise.all([
     db.appointment.findMany({
       where: {
+        id: excludeAppointmentId ? { not: excludeAppointmentId } : undefined,
         date: { lt: to },
         endDate: { gt: from },
         OR: [
-          { status: { in: ["PENDING", "CONFIRMED", "RESCHEDULED", "COMPLETED"] } },
+          { status: { in: [...OCCUPYING_STATUSES] } },
           // Un turno esperando pago solo retiene el horario mientras no venza la reserva
           { status: "PENDING_PAYMENT", reservedUntil: { gt: now } },
         ],
@@ -60,7 +85,7 @@ async function loadBusyIntervals(db: Db, from: Date, to: Date, now: Date) {
 export async function getAvailability(
   db: Db,
   durationMinutes: number,
-  range?: { from: DateKey; to: DateKey },
+  { range, excludeAppointmentId }: AvailabilityOptions = {},
 ): Promise<Availability> {
   const now = new Date();
   const { minDate, maxDate } = bookingWindow(now);
@@ -70,7 +95,13 @@ export async function getAvailability(
   const days: Availability["days"] = {};
   if (from > to) return { minDate, maxDate, days };
 
-  const busy = await loadBusyIntervals(db, zonedTime(from, 0), zonedTime(addDays(to, 1), 0), now);
+  const busy = await loadBusyIntervals(
+    db,
+    zonedTime(from, 0),
+    zonedTime(addDays(to, 1), 0),
+    now,
+    excludeAppointmentId,
+  );
   const duration = durationMinutes * 60_000;
 
   for (let day = from; day <= to; day = addDays(day, 1)) {
@@ -96,8 +127,16 @@ export async function getAvailability(
 }
 
 // Revalida un horario puntual (ej. al confirmar la reserva, dentro de la transacción)
-export async function isSlotAvailable(db: Db, durationMinutes: number, start: Date) {
+export async function isSlotAvailable(
+  db: Db,
+  durationMinutes: number,
+  start: Date,
+  excludeAppointmentId?: string,
+) {
   const day = dateKeyInZone(start);
-  const { days } = await getAvailability(db, durationMinutes, { from: day, to: day });
+  const { days } = await getAvailability(db, durationMinutes, {
+    range: { from: day, to: day },
+    excludeAppointmentId,
+  });
   return days[day]?.includes(start.toISOString()) ?? false;
 }

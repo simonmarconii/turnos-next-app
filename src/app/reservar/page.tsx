@@ -2,16 +2,10 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import { formatPrice } from "@/lib/format";
 import { BookingWizard, type ServiceOption } from "./booking-wizard";
 
 export const metadata: Metadata = { title: "Reservá tu turno" };
-
-const priceFormatter = new Intl.NumberFormat("es-AR", {
-  style: "currency",
-  currency: "ARS",
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 2,
-});
 
 async function BookingLoader() {
   const [services, user] = await Promise.all([
@@ -25,7 +19,7 @@ async function BookingLoader() {
     name: service.name,
     description: service.description,
     duration: service.duration,
-    priceLabel: priceFormatter.format(service.price.toNumber()),
+    priceLabel: formatPrice(service.price.toNumber()),
   }));
 
   return <BookingWizard services={options} sessionEmail={user?.email ?? null} />;
