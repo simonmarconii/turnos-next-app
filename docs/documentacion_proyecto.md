@@ -471,13 +471,14 @@ Pública (hay que agregarla a `isPublicRoute`). Implementa el flujo de la secci�
 Solo para usuarios con rol ADMIN (si no, se redirige al home). Una sola página con tres secciones apiladas, cada una con su título.
 
 **1. Turnos:**
-*   **Filtros** arriba: chips por estado ("Todos", "Esperando pago", "Reservados", "Confirmados", "Reprogramados", "Realizados", "Cancelados", "Vencidos") que se pueden combinar, y un rango de fechas opcional. Por defecto se muestran los próximos turnos activos, ordenados por fecha.
+*   **Filtros** arriba: tres chips de estado, de a uno por vez: "Todos", "Reservados" (en el local, confirmados y reprogramados) y "Cancelados", y un rango de fechas opcional. Por defecto (sin chip elegido) se muestran los próximos turnos activos, ordenados por fecha.
 *   **Listado:** tabla en desktop y tarjetas en mobile. Cada turno muestra fecha y hora, cliente (nombre, teléfono y email), servicio, etiqueta de estado y pago (método y si está cobrado).
 *   **Acciones por turno:**
     *   **Reprogramar:** abre un modal con el mismo selector de fecha y hora del paso 2 del wizard (solo horarios libres para la duración de ese servicio) y un campo opcional de motivo. Al confirmar, el turno pasa a `RESCHEDULED`.
     *   **Cancelar:** pide confirmación ("¿Cancelar el turno de Ana Pérez del jueves 12/03 a las 10:00?") y lo pasa a `CANCELLED`.
-    *   Además (según 2.2): **Marcar realizado** y, para pagos en el local, **Registrar cobro**.
-    *   Las acciones no aparecen en turnos cancelados, vencidos o realizados.
+    *   Además (según 2.2): **Marcar realizado** (solo para turnos que ya empezaron) y **Registrar cobro** (marca como pagado el cobro en el local; si el turno no tiene uno, por ejemplo porque intentó pagar con Mercado Pago, lo crea).
+    *   Las acciones no aparecen en turnos cancelados, vencidos o realizados, salvo **Registrar cobro**, que sigue disponible en un turno realizado que todavía no se cobró.
+    *   El campo de motivo al reprogramar se agrega junto con los emails (sección 5), que es donde se usa.
 
 **2. Servicios:**
 *   Listado de todos los servicios (activos e inactivos) con nombre, duración, precio y un indicador "Activo" / "Dado de baja".
@@ -485,8 +486,8 @@ Solo para usuarios con rol ADMIN (si no, se redirige al home). Una sola página 
 *   Por servicio: **Editar** (mismo formulario) y **Dar de baja** / **Dar de alta**. Dar de baja no borra el servicio (`isActive = false`): deja de aparecer en el wizard pero los turnos existentes se mantienen.
 
 **3. Bloqueo de fechas:**
-*   Formulario: fecha/hora desde, fecha/hora hasta y motivo (ej. "Vacaciones", "Licencia", "Feriado").
-*   Si en ese rango ya hay turnos activos, se muestra una advertencia con la lista, para que el admin decida si los reprograma o cancela.
+*   Formulario: fecha desde y hasta, horas opcionales (sin horas se bloquean los días completos) y motivo (ej. "Vacaciones", "Licencia", "Feriado"). Las fechas y horas se interpretan en la hora del local.
+*   Si en ese rango ya hay turnos activos, después de guardar se muestra una advertencia con la lista, para que el admin decida si los reprograma o cancela.
 *   Debajo, listado de franjas vigentes y futuras (desde–hasta y motivo), cada una con un botón **Eliminar** con confirmación. Al eliminarla, esos horarios vuelven a estar disponibles en el wizard.
 
 ### 7.6. Mis turnos (`/dashboard`)

@@ -4,22 +4,22 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import {
+  type ActionResult,
   canCancel,
   canReschedule,
   effectiveStatus,
   isWithinChangeLimit,
 } from "@/lib/appointments";
 import {
-  getAvailability,
-  isSlotAvailable,
-  lockSchedule,
-  type Availability,
-} from "@/lib/availability";
+  bookedDurationMinutes,
+  cancelAppointment,
+  parseStart,
+  rescheduleAppointment,
+} from "@/lib/appointment-mutations";
+import { getAvailability, type Availability } from "@/lib/availability";
 
 // Acciones del cliente sobre sus propios turnos (sección 7.6 de la doc). Todas verifican que el
 // turno sea del usuario logueado y el límite de 24 hs: no alcanza con esconder los botones.
-
-export type ActionResult = { ok: true } | { ok: false; message: string };
 
 const LIMIT_MESSAGE =
   "Faltan menos de 24 hs para tu turno: para cambiarlo, escribinos por WhatsApp.";
@@ -40,19 +40,7 @@ export async function cancelAppointmentAction(appointmentId: string): Promise<Ac
   }
   if (!isWithinChangeLimit(appointment.date)) return { ok: false, message: LIMIT_MESSAGE };
 
-  await prisma.$transaction([
-    prisma.appointment.update({
-      where: { id: appointment.id },
-      data: { status: "CANCELLED", reservedUntil: null },
-    }),
-    // Los cobros pendientes ya no se van a hacer. Los pagos aprobados de Mercado Pago quedan como
-    // están: la app no hace reembolsos (sección 7.8).
-    prisma.payment.updateMany({
-      where: { appointmentId: appointment.id, status: { in: ["PENDING", "IN_PROCESS"] } },
-      data: { status: "CANCELLED" },
-    }),
-  ]);
-
+  await cancelAppointment(appointment.id);
   revalidatePath("/dashboard");
   return { ok: true };
 }
@@ -69,9 +57,9 @@ export async function getRescheduleAvailabilityAction(
     return null;
   }
 
-  // Se mantiene la duración con la que se reservó, aunque el servicio haya cambiado después
-  const durationMinutes = (appointment.endDate.getTime() - appointment.date.getTime()) / 60_000;
-  return getAvailability(prisma, durationMinutes, { excludeAppointmentId: appointment.id });
+  return getAvailability(prisma, bookedDurationMinutes(appointment), {
+    excludeAppointmentId: appointment.id,
+  });
 }
 
 export async function rescheduleAppointmentAction(
@@ -86,27 +74,10 @@ export async function rescheduleAppointmentAction(
   }
   if (!isWithinChangeLimit(appointment.date)) return { ok: false, message: LIMIT_MESSAGE };
 
-  const newStart = new Date(typeof start === "string" ? start : NaN);
-  if (Number.isNaN(newStart.getTime())) {
-    return { ok: false, message: "El horario elegido no es válido." };
-  }
+  const newStart = parseStart(start);
+  if (!newStart) return { ok: false, message: "El horario elegido no es válido." };
 
-  const duration = appointment.endDate.getTime() - appointment.date.getTime();
-  const updated = await prisma.$transaction(async (tx) => {
-    await lockSchedule(tx);
-    if (!(await isSlotAvailable(tx, duration / 60_000, newStart, appointment.id))) return null;
-
-    return tx.appointment.update({
-      where: { id: appointment.id },
-      data: {
-        date: newStart,
-        endDate: new Date(newStart.getTime() + duration),
-        status: "RESCHEDULED",
-      },
-    });
-  });
-
-  if (!updated) {
+  if (!(await rescheduleAppointment(appointment, newStart))) {
     return { ok: false, message: "Ese horario se acaba de ocupar. Elegí otro, por favor." };
   }
 

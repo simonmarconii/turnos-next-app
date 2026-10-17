@@ -1,6 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
+import { redirect } from "next/navigation";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
 
@@ -36,3 +37,16 @@ export const getCurrentUser = cache(async () => {
     },
   });
 });
+
+// Para Server Actions de administración: null si quien llama no es ADMIN
+export async function getAdminUser() {
+  const user = await getCurrentUser();
+  return user?.role === "ADMIN" ? user : null;
+}
+
+// Para páginas de administración: si no es ADMIN, vuelve al home
+export async function requireAdmin() {
+  const user = await getAdminUser();
+  if (!user) redirect("/");
+  return user;
+}

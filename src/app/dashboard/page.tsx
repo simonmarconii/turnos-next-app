@@ -2,14 +2,15 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { CalendarPlus } from "lucide-react";
-import type { Payment } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import {
   canCancel,
   canReschedule,
   effectiveStatus,
+  isActiveStatus,
   isWithinChangeLimit,
+  paymentLabel,
 } from "@/lib/appointments";
 import { formatLongDate, formatTime } from "@/lib/dates";
 import { formatPrice } from "@/lib/format";
@@ -18,18 +19,6 @@ import { buttonPrimary, card } from "@/components/ui";
 import { AppointmentCard, type AppointmentView } from "./appointment-card";
 
 export const metadata: Metadata = { title: "Mis turnos" };
-
-const ACTIVE_STATUSES = ["PENDING_PAYMENT", "PENDING", "CONFIRMED", "RESCHEDULED"];
-
-function paymentLabel(payments: Payment[]): string {
-  // El cobro relevante es el aprobado, si hay; si no, el último intento
-  const payment = payments.find((p) => p.status === "PAID") ?? payments[0];
-  if (!payment) return "Sin pago registrado";
-  if (payment.method === "IN_STORE") {
-    return payment.status === "PAID" ? "Pagado en el local" : "Pago en el local";
-  }
-  return payment.status === "PAID" ? "Pagado con Mercado Pago" : "Mercado Pago (pendiente)";
-}
 
 async function MyAppointments() {
   // El proxy ya exige sesión; puede no haber `User` si Clerk todavía no verificó el email
@@ -74,7 +63,7 @@ async function MyAppointments() {
       canReschedule: canReschedule(status),
       withinLimit: isWithinChangeLimit(appointment.date, now),
       payUrl: status === "PENDING_PAYMENT" ? (checkout?.mpInitPoint ?? null) : null,
-      upcoming: ACTIVE_STATUSES.includes(status) && appointment.date > now,
+      upcoming: isActiveStatus(status) && appointment.date > now,
     };
   });
 

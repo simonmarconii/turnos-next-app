@@ -119,6 +119,12 @@ export function formatLongDate(instant: Date | string): string {
   return capitalize(longDateFormatter.format(new Date(instant)).replace(",", ""));
 }
 
+// "Jueves 12 de marzo" para un día suelto (DateKey). Se usa el mediodía UTC, que cae en el
+// mismo día en la zona del local.
+export function formatDay(key: DateKey): string {
+  return formatLongDate(`${key}T12:00:00Z`);
+}
+
 // "Noviembre de 2026"
 export function formatMonth(key: DateKey): string {
   return capitalize(monthFormatter.format(keyToUtcDate(key)));
