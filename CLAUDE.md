@@ -39,10 +39,7 @@ No hay framework de tests configurado.
 - Clerk maneja la sesión. `src/proxy.ts` es el middleware (Next 16 renombró `middleware.ts` → `proxy.ts`): todo es privado salvo `/`, `/sign-in`, `/sign-up`. Las rutas nuevas públicas (ej. el wizard de reserva para invitados, webhooks de Clerk/Mercado Pago) deben agregarse a `isPublicRoute`.
 - Prisma se conecta como rol `postgres` y **saltea RLS**: la autorización (filtrar por el usuario de Clerk, chequear rol ADMIN) se hace en el código del servidor.
 - `src/lib/supabase/{server,client}.ts` crean clientes de Supabase que mandan el token de Clerk para que apliquen las políticas RLS (`auth.jwt()->>'sub'`). Requieren `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (no están en `.env.example`) y la integración Clerk↔Supabase (en `supabase/config.toml` `[auth.third_party.clerk]` está deshabilitada).
-- Según la doc, `User.clerkId` es opcional: los invitados se crean por email sin Clerk y el `clerkId` se vincula luego vía webhook `user.created`.
+- `User.clerkId` es opcional. Al reservar como invitado se crea el `User` en la base y, después de responder (`after()` en `src/app/reservar/actions.ts`), una cuenta de Clerk sin contraseña con el email `reserved`, guardando su id en `clerkId`. `getCurrentUser()` (`src/lib/auth.ts`) busca por `clerkId` y, si no hay, vincula por email verificado.
 
 ### Rendering (Cache Components)
 `next.config.ts` activa `cacheComponents` y `partialPrefetching`. Todo lo que lea datos del request (`currentUser()`, `auth()`, componentes de Clerk como `<AuthNav>`, etc.) debe ir dentro de un `<Suspense>`, como se ve en `layout.tsx`, `dashboard/page.tsx` y las páginas de sign-in/up.
-
-### Variables de entorno
-Se leen de `.env.local` (Next y la CLI de Prisma). Plantilla en `.env.example`.

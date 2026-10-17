@@ -62,13 +62,17 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Cada sección ocupa al menos una pantalla completa (`svh` descuenta la barra del navegador en
+// celulares) y crece si el contenido no entra. La primera descuenta el header de 4rem.
+const sectionClass = "flex items-center px-6 py-16 sm:py-20";
+
 export default function Home() {
   return (
     <main className="flex flex-1 flex-col">
-      <section className="flex min-h-[70vh] items-center px-6 py-20">
+      <section className={`${sectionClass} min-h-[calc(100svh-4rem)]`}>
         <div className="mx-auto flex max-w-2xl flex-col items-center gap-6 text-center">
           <span className="h-px w-16 bg-accent" />
-          <h1 className="font-display text-5xl leading-tight font-semibold text-foreground sm:text-6xl">
+          <h1 className="font-display text-4xl leading-tight font-semibold text-foreground sm:text-5xl md:text-6xl">
             Tus pies, en manos profesionales
           </h1>
           <p className="max-w-lg text-lg text-muted">
@@ -84,8 +88,8 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="bg-soft px-6 py-20">
-        <div className="mx-auto flex max-w-5xl flex-col gap-12">
+      <section className={`${sectionClass} min-h-svh bg-soft`}>
+        <div className="mx-auto flex w-full max-w-5xl flex-col gap-12">
           <SectionTitle>¿Qué hacemos?</SectionTitle>
           <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {treatments.map(({ name, description, icon: Icon }) => (
@@ -102,8 +106,8 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="px-6 py-20">
-        <div className="mx-auto flex max-w-3xl flex-col gap-12">
+      <section className={`${sectionClass} min-h-svh`}>
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-12">
           <SectionTitle>Contactanos</SectionTitle>
           <div className="grid gap-6 sm:grid-cols-2">
             <a
