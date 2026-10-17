@@ -1,0 +1,11 @@
+// Prisma schema: https://pris.ly/d/prisma-schema
+// Las URLs de conexión se configuran en prisma7.config.ts (CLI) y src/lib/prisma.ts (app).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
