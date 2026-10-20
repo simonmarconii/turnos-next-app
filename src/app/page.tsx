@@ -42,10 +42,6 @@ const heroPhotos: CarouselPhoto[] = [
     src: "/carrusel/cuidado-pies.jpg",
     alt: "Profesional con guantes realizando un tratamiento en un pie",
   },
-  {
-    src: "/carrusel/sala-pedicuria.jpg",
-    alt: "Sala de pedicuría con sillón y bañera para pies",
-  },
 ];
 
 // lucide-react no incluye logos de marcas
