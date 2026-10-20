@@ -108,7 +108,7 @@ export function AppointmentCard({ appointment }: { appointment: AppointmentView 
             </button>
           </div>
           <p className="text-sm text-muted">
-            Faltan menos de 24 hs para tu turno: <WhatsAppLink>escribinos por WhatsApp</WhatsAppLink>.
+            Faltan menos de 24 hs para tu turno.
           </p>
         </div>
       )}

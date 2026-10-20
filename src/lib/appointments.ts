@@ -22,20 +22,23 @@ export function isActiveStatus(status: AppointmentStatus) {
   return ACTIVE.includes(status);
 }
 
-// Admin: solo se marca como realizado un turno que ya empezó
-export function canComplete(appointment: { status: AppointmentStatus; date: Date }, now = new Date()) {
-  return RESCHEDULABLE.includes(appointment.status) && appointment.date <= now;
+// Admin: se puede marcar como realizado un turno tomado, se pague en el local o con Mercado Pago
+// (no uno que todavía espera el pago online)
+export function canComplete(status: AppointmentStatus) {
+  return RESCHEDULABLE.includes(status);
 }
 
-// Admin: el cobro en el local se puede registrar mientras el turno no esté cancelado ni vencido
-// y no tenga ya un pago aprobado (también después de marcarlo como realizado)
+// Admin: solo los turnos que se pagan en el local tienen un cobro para registrar. Se puede
+// mientras el turno no esté cancelado ni vencido (también después de marcarlo como realizado).
 export function canRegisterPayment(appointment: {
   status: AppointmentStatus;
-  payments: { status: string }[];
+  payments: { method: PaymentMethod; status: PaymentStatus }[];
 }) {
   return (
     [...RESCHEDULABLE, "COMPLETED"].includes(appointment.status) &&
-    !appointment.payments.some((payment) => payment.status === "PAID")
+    appointment.payments.some(
+      (payment) => payment.method === "IN_STORE" && payment.status === "PENDING",
+    )
   );
 }
 

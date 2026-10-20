@@ -92,8 +92,8 @@ export async function completeAppointmentAction(appointmentId: string): Promise<
   if (!(await getAdminUser())) return FORBIDDEN;
   const appointment = await findAppointment(appointmentId);
   if (!appointment) return NOT_FOUND;
-  if (!canComplete(appointment)) {
-    return { ok: false, message: "Solo se pueden marcar como realizados turnos que ya empezaron." };
+  if (!canComplete(appointment.status)) {
+    return { ok: false, message: "Este turno no se puede marcar como realizado." };
   }
 
   await prisma.appointment.update({
@@ -103,37 +103,24 @@ export async function completeAppointmentAction(appointmentId: string): Promise<
   return done();
 }
 
-// Registra el cobro en el local: marca como pagado el Payment IN_STORE pendiente o, si el turno
-// no tiene uno (ej. intentó pagar con Mercado Pago y terminó pagando en el local), lo crea.
+// Registra el cobro de un turno que se paga en el local: marca como pagado su Payment IN_STORE
+// pendiente. Los pagos de Mercado Pago se registran solos por el webhook.
 export async function registerPaymentAction(appointmentId: string): Promise<ActionResult> {
   if (!(await getAdminUser())) return FORBIDDEN;
   const appointment = await findAppointment(appointmentId);
   if (!appointment) return NOT_FOUND;
   if (!canRegisterPayment(appointment)) {
-    return { ok: false, message: "Este turno ya está cobrado o no se puede cobrar." };
+    return { ok: false, message: "Este turno no tiene un cobro en el local pendiente." };
   }
 
-  const now = new Date();
+  // canRegisterPayment garantiza que existe
   const pending = appointment.payments.find(
     (payment) => payment.method === "IN_STORE" && payment.status === "PENDING",
-  );
-  if (pending) {
-    await prisma.payment.update({
-      where: { id: pending.id },
-      data: { status: "PAID", paidAt: now },
-    });
-  } else {
-    const lastAmount = appointment.payments[0]?.amount;
-    await prisma.payment.create({
-      data: {
-        appointmentId: appointment.id,
-        method: "IN_STORE",
-        status: "PAID",
-        paidAt: now,
-        amount: lastAmount ?? appointment.service.price,
-      },
-    });
-  }
+  )!;
+  await prisma.payment.update({
+    where: { id: pending.id },
+    data: { status: "PAID", paidAt: new Date() },
+  });
   return done();
 }
 

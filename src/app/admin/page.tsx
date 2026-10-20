@@ -39,10 +39,11 @@ const MAX_ROWS = 200;
 const STATUS_FILTERS: Record<StatusFilter, AppointmentStatus[] | "all"> = {
   todos: "all",
   reservados: ["PENDING", "CONFIRMED", "RESCHEDULED"],
+  realizados: ["COMPLETED"],
   cancelados: ["CANCELLED"],
 };
 
-// Filtros en la URL: ?estado=todos|reservados|cancelados &desde=YYYY-MM-DD &hasta=YYYY-MM-DD.
+// Filtros en la URL: ?estado=todos|reservados|realizados|cancelados &desde=YYYY-MM-DD &hasta=YYYY-MM-DD.
 // Sin `estado` se muestran los próximos turnos activos.
 type AppointmentFilters = {
   status: StatusFilter | null;
@@ -151,7 +152,8 @@ async function AdminContent({ searchParams }: { searchParams: PageProps<"/admin"
       ),
       canCancel: canCancel(status),
       canReschedule: canReschedule(status),
-      canComplete: canComplete({ status, date: appointment.date }, now),
+      canComplete: canComplete(status),
+      upcoming: appointment.date > now,
       canRegisterPayment: canRegisterPayment({ status, payments: appointment.payments }),
     };
   });

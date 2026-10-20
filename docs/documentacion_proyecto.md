@@ -93,7 +93,7 @@ Ruta: `POST /api/webhooks/mercadopago` (pública: debe estar en `isPublicRoute` 
 
 1.  **Validar la firma** (header `x-signature`) con el secreto de webhooks configurado en Mercado Pago.
 2.  **Registrar el evento** en `WebhookEvent` (`provider = MERCADO_PAGO`, `externalId` = `id` de la notificación). Si ya existe por `@@unique([provider, externalId])`, es un reintento: se responde 200 sin reprocesar.
-3.  **Responder 200 rápido.** Mercado Pago reintenta si no recibe respuesta a tiempo.
+3.  **Procesar y responder.** El procesamiento (una consulta a la API y pocas escrituras) se hace antes de responder: si falla, el evento queda `FAILED` y se responde 500 para que Mercado Pago reintente. Los eventos ya `PROCESSED` o `IGNORED` se responden 200 sin reprocesar.
 4.  **Consultar el pago real** con `GET /v1/payments/{data.id}`; nunca confiar en el cuerpo de la notificación.
 5.  **Ubicar el `Payment`** por `external_reference` y actualizar `mpPaymentId`, `mpStatus`, `mpStatusDetail`, `mpPaymentTypeId`, `mpPaymentMethodId`, `mpMerchantOrderId`, `mpPayment` (respuesta completa) y el `status` simplificado según la tabla 4.6.
 6.  **Actualizar el turno:** si el pago quedó `PAID`, el `Appointment` pasa a `CONFIRMED`, se limpia `reservedUntil` y se envía el email de turno confirmado.
@@ -465,18 +465,26 @@ Pública (hay que agregarla a `isPublicRoute`). Implementa el flujo de la secci�
 *   Debajo, dos botones de igual ancho: **"Pagar con Mercado Pago"** (principal) y **"Pagar en el local"** (secundario).
 *   Texto chico bajo el botón de Mercado Pago: "Te reservamos el horario por 10 minutos mientras completás el pago. Si no se completa, el horario se libera."
 
-**Pantalla de turno reservado:** al terminar (pago en el local, o vuelta de Mercado Pago con pago aprobado), ícono de tilde, título "¡Tu turno está reservado!", el mismo resumen, "Te enviamos los detalles a {email}" y dos botones: "Ver mis turnos" y "Volver al inicio". Para Mercado Pago hay variantes para pago pendiente ("Tu pago se está procesando") y rechazado ("El pago no se pudo completar", con botón para reintentar).
+**Pantalla de turno reservado:** al terminar (pago en el local, o vuelta de Mercado Pago con pago aprobado), ícono de tilde, título "¡Tu turno está reservado!", el mismo resumen, "Te enviamos los detalles a {email}" y dos botones: "Ver mis turnos" y "Volver al inicio".
+
+**Vuelta de Mercado Pago (`/reservar/pago`):** es la `back_url` del checkout. Ubica el `Payment` por `external_reference` y muestra el estado de la base, no el de la URL. Si el pago todavía no está sincronizado y la URL trae `payment_id`, lo consulta a Mercado Pago con la misma lógica del webhook (`src/lib/mercadopago-payments.ts`), así la confirmación es inmediata aunque el webhook demore. Variantes:
+*   **Confirmado:** "¡Tu turno está reservado!" con resumen, "Ver mis turnos" y "Volver al inicio".
+*   **Confirmando** (Mercado Pago dice aprobado pero todavía no se sincronizó): se actualiza sola cada 3 segundos durante 30 segundos; después avisa que se confirmará por email.
+*   **En proceso** (ej. pago en efectivo): "Tu pago se está procesando".
+*   **Rechazado o abandonado con la reserva vigente:** "Intentar de nuevo" (mismo checkout) y "Elegir otro medio de pago" (cancela la reserva pendiente para liberar el horario y vuelve al wizard).
+*   **Vencido:** "El tiempo para pagar venció" y "Elegir otro horario".
+*   **Pagado sin horario** (pago fuera de término con el horario ocupado): pide escribir por WhatsApp para coordinar otro turno o la devolución.
 
 ### 7.5. Panel de administración (`/admin`)
 Solo para usuarios con rol ADMIN (si no, se redirige al home). Una sola página con tres secciones apiladas, cada una con su título.
 
 **1. Turnos:**
-*   **Filtros** arriba: tres chips de estado, de a uno por vez: "Todos", "Reservados" (en el local, confirmados y reprogramados) y "Cancelados", y un rango de fechas opcional. Por defecto (sin chip elegido) se muestran los próximos turnos activos, ordenados por fecha.
+*   **Filtros** arriba: cuatro chips de estado, de a uno por vez: "Todos", "Reservados" (en el local, confirmados y reprogramados), "Realizados" y "Cancelados", y un rango de fechas opcional. Por defecto (sin chip elegido) se muestran los próximos turnos activos, ordenados por fecha.
 *   **Listado:** tabla en desktop y tarjetas en mobile. Cada turno muestra fecha y hora, cliente (nombre, teléfono y email), servicio, etiqueta de estado y pago (método y si está cobrado).
 *   **Acciones por turno:**
     *   **Reprogramar:** abre un modal con el mismo selector de fecha y hora del paso 2 del wizard (solo horarios libres para la duración de ese servicio) y un campo opcional de motivo. Al confirmar, el turno pasa a `RESCHEDULED`.
     *   **Cancelar:** pide confirmación ("¿Cancelar el turno de Ana Pérez del jueves 12/03 a las 10:00?") y lo pasa a `CANCELLED`.
-    *   Además (según 2.2): **Marcar realizado** (solo para turnos que ya empezaron) y **Registrar cobro** (marca como pagado el cobro en el local; si el turno no tiene uno, por ejemplo porque intentó pagar con Mercado Pago, lo crea).
+    *   Además (según 2.2): **Marcar realizado**, para turnos reservados, confirmados o reprogramados, se paguen en el local o con Mercado Pago (si el turno todavía no llegó, la confirmación lo advierte), y **Registrar cobro**, solo para turnos que se pagan en el local y tienen el cobro pendiente (los pagos de Mercado Pago se registran solos con el webhook).
     *   Las acciones no aparecen en turnos cancelados, vencidos o realizados, salvo **Registrar cobro**, que sigue disponible en un turno realizado que todavía no se cobró.
     *   El campo de motivo al reprogramar se agrega junto con los emails (sección 5), que es donde se usa.
 

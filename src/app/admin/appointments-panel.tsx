@@ -31,11 +31,12 @@ export type AdminAppointmentRow = {
   canCancel: boolean;
   canReschedule: boolean;
   canComplete: boolean;
-  canRegisterPayment: boolean;
+  canRegisterPayment: boolean; // solo turnos que se pagan en el local, con el cobro pendiente
+  upcoming: boolean; // el turno todavía no empezó
 };
 
 // Valor de `?estado=` en la URL. Qué estados incluye cada uno se define en page.tsx.
-export type StatusFilter = "todos" | "reservados" | "cancelados";
+export type StatusFilter = "todos" | "reservados" | "realizados" | "cancelados";
 
 type FilterState = {
   status: StatusFilter | null; // null = próximos turnos activos
@@ -46,6 +47,7 @@ type FilterState = {
 const STATUS_FILTERS: [StatusFilter, string][] = [
   ["todos", "Todos"],
   ["reservados", "Reservados"],
+  ["realizados", "Realizados"],
   ["cancelados", "Cancelados"],
 ];
 
@@ -303,6 +305,12 @@ function AppointmentRow({ row }: { row: AdminAppointmentRow }) {
             ¿Confirmás que se realizó el turno de <strong>{row.clientName}</strong> del{" "}
             <strong>{when}</strong>?
           </p>
+          {row.upcoming && (
+            <p className="rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
+              Este turno todavía no llegó. Una vez marcado como realizado ya no se puede reprogramar
+              ni cancelar.
+            </p>
+          )}
         </ConfirmDialog>
       </Modal>
 
