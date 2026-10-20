@@ -2,15 +2,20 @@
 
 import { after } from "next/server";
 import { clerkClient } from "@clerk/nextjs/server";
-import type { User } from "@/generated/prisma/client";
+import { Preference } from "mercadopago";
+import type { Prisma, Service, User } from "@/generated/prisma/client";
+import { bookingConfig } from "@/config/booking";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import mercadoPagoClient from "@/lib/mercadopago";
 import {
   getAvailability,
   isSlotAvailable,
   lockSchedule,
   type Availability,
 } from "@/lib/availability";
+
+const preferenceClient = new Preference(mercadoPagoClient);
 
 // Los argumentos de una Server Action llegan del navegador: se validan todos acá.
 
@@ -34,13 +39,15 @@ export type BookingInput = {
   identity?: BookingIdentity;
 };
 
-export type BookingResult =
-  | { ok: true; email: string }
-  | {
-      ok: false;
-      code: "SLOT_TAKEN" | "EMAIL_NOT_FOUND" | "INVALID";
-      message: string;
-    };
+type BookingError = {
+  ok: false;
+  code: "SLOT_TAKEN" | "EMAIL_NOT_FOUND" | "INVALID" | "PAYMENT_ERROR";
+  message: string;
+};
+
+export type BookingResult = { ok: true; email: string } | BookingError;
+
+export type CheckoutResult = { ok: true; initPoint: string, email: string } | BookingError;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHONE_PATTERN = /^[0-9+()\s-]{6,20}$/;
@@ -56,12 +63,18 @@ function cleanEmail(value: unknown): string | null {
   return email && EMAIL_PATTERN.test(email) ? email : null;
 }
 
-const invalid = (message: string): BookingResult => ({ ok: false, code: "INVALID", message });
+const invalid = (message: string): BookingError => ({ ok: false, code: "INVALID", message });
+
+const SLOT_TAKEN: BookingError = {
+  ok: false,
+  code: "SLOT_TAKEN",
+  message: "Ese horario se acaba de ocupar. Elegí otro, por favor.",
+};
 
 // Busca o crea el usuario para el que se hace la reserva (shadow account, sección 3.2)
 async function resolveUser(
   identity: BookingIdentity | undefined,
-): Promise<{ user: User } | { error: BookingResult }> {
+): Promise<{ user: User } | { error: BookingError }> {
   const sessionUser = await getCurrentUser();
   if (sessionUser) return { user: sessionUser };
 
@@ -128,25 +141,46 @@ async function ensureClerkAccount(user: User) {
   }
 }
 
-// Reserva con pago en el local: turno en PENDING + Payment IN_STORE (sección 3.1, paso 4)
-export async function createInStoreBookingAction(input: BookingInput): Promise<BookingResult> {
+// Validaciones comunes a los dos medios de pago: datos, servicio activo y usuario
+async function prepareBooking(
+  input: BookingInput,
+): Promise<{ service: Service; user: User; start: Date } | { error: BookingError }> {
   if (typeof input?.serviceId !== "string" || typeof input.start !== "string") {
-    return invalid("Faltan datos de la reserva.");
+    return { error: invalid("Faltan datos de la reserva.") };
   }
 
   const start = new Date(input.start);
-  if (Number.isNaN(start.getTime())) return invalid("El horario elegido no es válido.");
+  if (Number.isNaN(start.getTime())) return { error: invalid("El horario elegido no es válido.") };
 
   const service = await prisma.service.findFirst({
     where: { id: input.serviceId, isActive: true },
   });
-  if (!service) return invalid("El servicio elegido ya no está disponible.");
+  if (!service) return { error: invalid("El servicio elegido ya no está disponible.") };
 
   const resolved = await resolveUser(input.identity);
-  if ("error" in resolved) return resolved.error;
-  const { user } = resolved;
+  if ("error" in resolved) return resolved;
 
-  const appointment = await prisma.$transaction(async (tx) => {
+  return { service, user: resolved.user, start };
+}
+
+// Crea el turno con su primer Payment si el horario sigue libre; null si se ocupó mientras el
+// cliente completaba el wizard. El advisory lock evita que dos reservas validen el mismo horario.
+async function reserveAppointment({
+  service,
+  user,
+  start,
+  status,
+  reservedUntil,
+  payment,
+}: {
+  service: Service;
+  user: User;
+  start: Date;
+  status: "PENDING" | "PENDING_PAYMENT";
+  reservedUntil?: Date;
+  payment: Omit<Prisma.PaymentCreateWithoutAppointmentInput, "amount">;
+}) {
+  return prisma.$transaction(async (tx) => {
     await lockSchedule(tx);
 
     if (!(await isSlotAvailable(tx, service.duration, start))) return null;
@@ -155,27 +189,150 @@ export async function createInStoreBookingAction(input: BookingInput): Promise<B
       data: {
         date: start,
         endDate: new Date(start.getTime() + service.duration * 60_000),
-        status: "PENDING",
+        status,
+        reservedUntil,
         userId: user.id,
         serviceId: service.id,
-        payments: {
-          // El monto se congela con el precio actual del servicio
-          create: { method: "IN_STORE", status: "PENDING", amount: service.price },
-        },
+        // El monto se congela con el precio actual del servicio
+        payments: { create: { ...payment, amount: service.price } },
       },
+      include: { payments: true },
     });
   });
+}
 
-  if (!appointment) {
-    return {
-      ok: false,
-      code: "SLOT_TAKEN",
-      message: "Ese horario se acaba de ocupar. Elegí otro, por favor.",
-    };
-  }
+// Reserva con pago en el local: turno en PENDING + Payment IN_STORE (sección 3.1, paso 4)
+export async function createInStoreBookingAction(input: BookingInput): Promise<BookingResult> {
+  const prepared = await prepareBooking(input);
+  if ("error" in prepared) return prepared.error;
+  const { service, user, start } = prepared;
+
+  const appointment = await reserveAppointment({
+    service,
+    user,
+    start,
+    status: "PENDING",
+    payment: { method: "IN_STORE", status: "PENDING" },
+  });
+  if (!appointment) return SLOT_TAKEN;
 
   // Después de responder, para no demorar la confirmación con las llamadas a Clerk
   after(() => ensureClerkAccount(user));
 
   return { ok: true, email: user.email };
+}
+
+// Mercado Pago espera fechas con offset explícito (yyyy-MM-ddTHH:mm:ss.SSS±HH:mm)
+function toMercadoPagoDate(date: Date) {
+  return date.toISOString().replace("Z", "+00:00");
+}
+
+// Reserva con pago online (sección 4.2): turno en PENDING_PAYMENT que retiene el horario
+// `paymentHoldMinutes`, Payment MERCADO_PAGO y la preferencia de Checkout Pro. Devuelve la URL de
+// checkout a la que hay que redirigir al cliente. El turno se confirma recién en el webhook.
+export async function createCheckout(input: BookingInput): Promise<CheckoutResult> {
+  const appUrl = process.env.APP_URL?.replace(/\/+$/, "");
+  if (!appUrl) {
+    console.error("Falta la variable de entorno APP_URL: no se puede crear la preferencia");
+    return {
+      ok: false,
+      code: "PAYMENT_ERROR",
+      message: "El pago online no está disponible en este momento. Podés elegir pagar en el local.",
+    };
+  }
+
+  const prepared = await prepareBooking(input);
+  if ("error" in prepared) return prepared.error;
+  const { service, user, start } = prepared;
+
+  // reservedUntil y Payment.expiresAt coinciden (sección 4.3)
+  const reservedUntil = new Date(Date.now() + bookingConfig.paymentHoldMinutes * 60_000);
+
+  const appointment = await reserveAppointment({
+    service,
+    user,
+    start,
+    status: "PENDING_PAYMENT",
+    reservedUntil,
+    payment: { method: "MERCADO_PAGO", status: "PENDING", expiresAt: reservedUntil },
+  });
+  if (!appointment) return SLOT_TAKEN;
+  const payment = appointment.payments[0];
+
+  // La llamada a Mercado Pago queda fuera de la transacción (sección 4.2)
+  let initPoint: string;
+  try {
+    // Mercado Pago rechaza auto_return y notification_url que no sean públicos (ej. localhost):
+    // para probar los pagos en desarrollo, APP_URL tiene que ser un túnel https (ngrok, etc.)
+    const isPublicUrl = appUrl.startsWith("https://");
+    const returnUrl = `${appUrl}/reservar/pago`;
+
+    const preference = await preferenceClient.create({
+      body: {
+        items: [
+          {
+            id: service.id,
+            title: service.name,
+            quantity: 1,
+            unit_price: payment.amount.toNumber(),
+            currency_id: payment.currency,
+          },
+        ],
+        payer: {
+          email: user.email,
+          name: user.firstName || undefined,
+          surname: user.lastName || undefined,
+        },
+        // El webhook ubica el Payment con este id (sección 4.1)
+        external_reference: payment.id,
+        metadata: { appointment_id: appointment.id },
+        // Vence junto con la retención del horario: después no se puede pagar
+        expires: true,
+        expiration_date_from: toMercadoPagoDate(new Date()),
+        expiration_date_to: toMercadoPagoDate(reservedUntil),
+        // La vuelta solo muestra un mensaje; la fuente de verdad es el webhook (sección 4.4)
+        back_urls: { success: returnUrl, pending: returnUrl, failure: returnUrl },
+        ...(isPublicUrl && {
+          auto_return: "approved",
+          notification_url: `${appUrl}/api/webhooks/mercadopago`,
+        }),
+      },
+      // Si la llamada se reintenta, Mercado Pago no crea una segunda preferencia
+      requestOptions: { idempotencyKey: payment.id },
+    });
+
+    if (!preference.id || !preference.init_point) {
+      throw new Error("La respuesta de Mercado Pago no trae id o init_point");
+    }
+    initPoint = preference.init_point;
+
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { mpPreferenceId: preference.id, mpInitPoint: initPoint },
+    });
+  } catch (error) {
+    console.error(`No se pudo crear la preferencia del turno ${appointment.id}`, error);
+
+    // Sin preferencia no hay forma de pagar: se borra el turno para liberar el horario en el
+    // momento (en vez de dejarlo retenido 10 minutos) y que no aparezca en "Mis turnos".
+    await prisma
+      .$transaction([
+        prisma.payment.deleteMany({ where: { appointmentId: appointment.id } }),
+        prisma.appointment.delete({ where: { id: appointment.id } }),
+      ])
+      .catch((cleanupError) =>
+        console.error(`No se pudo liberar el turno ${appointment.id}`, cleanupError),
+      );
+
+    return {
+      ok: false,
+      code: "PAYMENT_ERROR",
+      message:
+        "No pudimos iniciar el pago con Mercado Pago. Intentá de nuevo o elegí pagar en el local.",
+    };
+  }
+
+  after(() => ensureClerkAccount(user));
+
+  return { ok: true, initPoint, email: user.email };
 }

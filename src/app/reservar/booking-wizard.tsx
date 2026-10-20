@@ -16,11 +16,13 @@ import { buttonPrimary, buttonSecondary, card, input } from "@/components/ui";
 import { formatLongDate, formatTime } from "@/lib/dates";
 import type { Availability } from "@/lib/availability";
 import {
+  createCheckout,
   createInStoreBookingAction,
   getAvailabilityAction,
   type BookingIdentity,
   type BookingResult,
 } from "./actions";
+import { useRouter } from "next/navigation";
 
 export type ServiceOption = {
   id: string;
@@ -63,6 +65,8 @@ export function BookingWizard({
   const [bookedEmail, setBookedEmail] = useState<string | null>(null);
   const [isLoadingSlots, startLoadingSlots] = useTransition();
   const [isBooking, startBooking] = useTransition();
+
+  const router = useRouter();
 
   // Cada paso arranca desde arriba (en el celular el paso anterior suele quedar scrolleado)
   useEffect(() => {
@@ -129,6 +133,32 @@ export function BookingWizard({
         });
       }
     });
+  }
+
+  function confirmMercadoPago() {
+    if (!service || !slot) return;
+    setBookingError(null);
+    startBooking(async () => {
+      try {
+        const result = await createCheckout({
+          serviceId: service.id,
+          start: slot,
+          identity: identity ?? undefined,
+        });
+        if (result.ok) {
+          setBookedEmail(result.email);
+          router.push(result.initPoint);
+        } else {
+          setBookingError(result);
+        }
+      } catch (error) {
+        setBookingError({
+          ok: false,
+          code: "INVALID",
+          message: "No pudimos confirmar la reserva. Revisá tu conexión e intentá de nuevo.",
+        });
+      }
+    })
   }
 
   function pickAnotherSlot() {
@@ -306,10 +336,12 @@ export function BookingWizard({
               {isBooking ? "Reservando…" : "Pagar en el local"}
             </button>
             <div className="flex flex-col gap-1">
-              <button type="button" disabled className={`${buttonSecondary} w-full`}>
+              <button 
+                type="button" 
+                onClick={confirmMercadoPago}
+                className={buttonSecondary}>
                 Pagar con Mercado Pago
               </button>
-              <p className="text-center text-xs text-muted">Muy pronto vas a poder pagar online.</p>
             </div>
           </div>
         </section>
