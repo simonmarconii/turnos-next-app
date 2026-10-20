@@ -6,9 +6,7 @@ import type { PaymentStatus, Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import mercadoPagoClient from "@/lib/mercadopago";
 import { isSlotAvailable, lockSchedule } from "@/lib/availability";
-import { formatLongDate, formatTime } from "@/lib/dates";
-import { sendEmail } from "@/lib/email";
-import EmailTemplate from "@/components/email-template";
+import { notifyBooked, notifyPaidWithoutSlot } from "@/lib/notifications";
 
 // Sincroniza un pago de Mercado Pago con la base (secciones 4.5 y 4.6 de la doc). La usan el
 // webhook y la página de vuelta del checkout (/reservar/pago), así las dos aplican la misma
@@ -33,8 +31,10 @@ export type SyncOutcome = {
   status: "PROCESSED" | "IGNORED" | "FAILED";
   // Detalle para WebhookEvent.error (también en pagos procesados que requieren revisión)
   note?: string;
-  // Turno que esta sincronización pasó a CONFIRMED: hay que mandarle el email de confirmación
+  // Turno que esta sincronización pasó a CONFIRMED: hay que mandar los emails de reserva
   confirmedAppointmentId?: string;
+  // Turno pagado fuera de término sin horario disponible: hay que avisar a los admins
+  paidWithoutSlotAppointmentId?: string;
 };
 
 export async function syncMercadoPagoPayment(mpPaymentId: string): Promise<SyncOutcome> {
@@ -149,6 +149,9 @@ export async function syncMercadoPagoPayment(mpPaymentId: string): Promise<SyncO
       return {
         status: "PROCESSED",
         note: "Pago aprobado fuera de término con el horario ocupado: requiere devolución manual",
+        // Solo la primera vez que se registra el pago: las notificaciones siguientes del mismo
+        // pago no vuelven a avisar
+        paidWithoutSlotAppointmentId: payment.status !== "PAID" ? appointment.id : undefined,
       };
     }
 
@@ -165,24 +168,10 @@ export async function syncMercadoPagoPayment(mpPaymentId: string): Promise<SyncO
   });
 }
 
-export async function sendConfirmationEmail(appointmentId: string) {
-  try {
-    const appointment = await prisma.appointment.findUniqueOrThrow({
-      where: { id: appointmentId },
-      include: { service: true, user: true },
-    });
-    await sendEmail({
-      to: appointment.user.email,
-      subject: "Tu turno está confirmado",
-      react: EmailTemplate({
-        name: appointment.user.firstName,
-        lastname: appointment.user.lastName,
-        date: formatLongDate(appointment.date),
-        time: `${formatTime(appointment.date)} hs`,
-        serviceName: appointment.service.name,
-      }),
-    });
-  } catch (error) {
-    console.error(`No se pudo enviar el email de confirmación del turno ${appointmentId}`, error);
+// Emails que corresponden al resultado de una sincronización. Llamarla con `after()`.
+export async function notifySyncOutcome(outcome: SyncOutcome) {
+  if (outcome.confirmedAppointmentId) await notifyBooked(outcome.confirmedAppointmentId);
+  if (outcome.paidWithoutSlotAppointmentId) {
+    await notifyPaidWithoutSlot(outcome.paidWithoutSlotAppointmentId);
   }
 }

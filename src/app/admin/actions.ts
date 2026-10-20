@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAdminUser } from "@/lib/auth";
+import { notifyCancelled, notifyRescheduled } from "@/lib/notifications";
 import {
   type ActionResult,
   canCancel,
@@ -53,6 +55,10 @@ export async function adminCancelAppointmentAction(appointmentId: string): Promi
   }
 
   await cancelAppointment(appointment.id);
+  // Un turno que esperaba el pago nunca se confirmó (no hubo email de reserva): no se avisa
+  if (appointment.status !== "PENDING_PAYMENT") {
+    after(() => notifyCancelled(appointment.id, "admin"));
+  }
   return done();
 }
 
@@ -85,6 +91,7 @@ export async function adminRescheduleAppointmentAction(
   if (!(await rescheduleAppointment(appointment, newStart))) {
     return { ok: false, message: "Ese horario se acaba de ocupar. Elegí otro." };
   }
+  after(() => notifyRescheduled(appointment.id, appointment.date, "admin"));
   return done();
 }
 

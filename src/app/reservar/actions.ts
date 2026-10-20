@@ -8,6 +8,7 @@ import { bookingConfig } from "@/config/booking";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import mercadoPagoClient from "@/lib/mercadopago";
+import { notifyBooked } from "@/lib/notifications";
 import {
   getAvailability,
   isSlotAvailable,
@@ -216,8 +217,12 @@ export async function createInStoreBookingAction(input: BookingInput): Promise<B
   });
   if (!appointment) return SLOT_TAKEN;
 
-  // Después de responder, para no demorar la confirmación con las llamadas a Clerk
-  after(() => ensureClerkAccount(user));
+  // Después de responder, para no demorar la confirmación. En orden: el email decide si incluye
+  // cómo iniciar sesión según la cuenta de Clerk que se crea antes.
+  after(async () => {
+    await ensureClerkAccount(user);
+    await notifyBooked(appointment.id);
+  });
 
   return { ok: true, email: user.email };
 }

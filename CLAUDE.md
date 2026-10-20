@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Sistema de reserva de turnos para un servicio de pedicuría. La especificación funcional (roles, wizard de reserva, "shadow accounts", emails, modelo de datos propuesto) está en `docs/documentacion_proyecto.md`: leerla antes de implementar features.
 
-Estado actual: solo está armado el esqueleto (auth con Clerk, landing, `/dashboard` vacío, cliente de Prisma). `prisma/schema.prisma` es la fuente de verdad del modelo de datos; la doc tiene una copia comentada que hay que actualizar si cambia el esquema. Resend y Mercado Pago aún no están instalados.
+Estado actual: solo está armado el esqueleto (auth con Clerk, landing, `/dashboard` vacío, cliente de Prisma). `prisma/schema.prisma` es la fuente de verdad del modelo de datos; la doc tiene una copia comentada que hay que actualizar si cambia el esquema. Los emails (Resend + React Email) se arman en `src/lib/notifications.ts` y se mandan con `after()`.
 
 Modelo de pagos (Mercado Pago Checkout Pro): el estado del cobro vive en `Payment` (1:N con `Appointment`), no en el turno. Cada `Payment` de MP es una preferencia y su `id` se usa como `external_reference`. Un turno pagado online arranca en `PENDING_PAYMENT` y retiene el horario hasta `reservedUntil`. `WebhookEvent` guarda los webhooks de MP y Clerk para que el procesamiento sea idempotente. Los montos son `Decimal`: convertirlos antes de pasarlos a Client Components.
 

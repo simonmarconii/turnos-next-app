@@ -17,7 +17,7 @@ import { prisma } from "@/lib/prisma";
 import { effectiveStatus } from "@/lib/appointments";
 import { formatLongDate, formatTime } from "@/lib/dates";
 import { formatPrice } from "@/lib/format";
-import { sendConfirmationEmail, syncMercadoPagoPayment } from "@/lib/mercadopago-payments";
+import { notifySyncOutcome, syncMercadoPagoPayment } from "@/lib/mercadopago-payments";
 import { BookingSummary } from "@/components/booking-summary";
 import { buttonPrimary, buttonSecondary } from "@/components/ui";
 import { releasePendingPaymentAction } from "./actions";
@@ -91,8 +91,8 @@ async function PaymentResult({ searchParams }: { searchParams: Promise<SearchPar
   // se consulta el pago a Mercado Pago con la misma lógica que el webhook
   if (payment && payment.status !== "PAID" && mpPaymentId && /^\d+$/.test(mpPaymentId)) {
     try {
-      const { confirmedAppointmentId } = await syncMercadoPagoPayment(mpPaymentId);
-      if (confirmedAppointmentId) after(() => sendConfirmationEmail(confirmedAppointmentId));
+      const outcome = await syncMercadoPagoPayment(mpPaymentId);
+      after(() => notifySyncOutcome(outcome));
       payment = await loadPayment(payment.id);
     } catch (error) {
       console.error(`No se pudo verificar el pago ${mpPaymentId} en Mercado Pago`, error);

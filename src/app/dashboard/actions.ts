@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import {
@@ -17,6 +18,7 @@ import {
   rescheduleAppointment,
 } from "@/lib/appointment-mutations";
 import { getAvailability, type Availability } from "@/lib/availability";
+import { notifyCancelled, notifyRescheduled } from "@/lib/notifications";
 
 // Acciones del cliente sobre sus propios turnos (sección 7.6 de la doc). Todas verifican que el
 // turno sea del usuario logueado y el límite de 24 hs: no alcanza con esconder los botones.
@@ -41,6 +43,10 @@ export async function cancelAppointmentAction(appointmentId: string): Promise<Ac
   if (!isWithinChangeLimit(appointment.date)) return { ok: false, message: LIMIT_MESSAGE };
 
   await cancelAppointment(appointment.id);
+  // Un turno que esperaba el pago nunca se confirmó (no hubo email de reserva): no se avisa
+  if (appointment.status !== "PENDING_PAYMENT") {
+    after(() => notifyCancelled(appointment.id, "client"));
+  }
   revalidatePath("/dashboard");
   return { ok: true };
 }
@@ -81,6 +87,7 @@ export async function rescheduleAppointmentAction(
     return { ok: false, message: "Ese horario se acaba de ocupar. Elegí otro, por favor." };
   }
 
+  after(() => notifyRescheduled(appointment.id, appointment.date, "client"));
   revalidatePath("/dashboard");
   return { ok: true };
 }

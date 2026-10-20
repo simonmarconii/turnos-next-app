@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
-  sendConfirmationEmail,
+  notifySyncOutcome,
   syncMercadoPagoPayment,
   type SyncOutcome,
 } from "@/lib/mercadopago-payments";
@@ -101,9 +101,8 @@ export async function POST(request: NextRequest) {
   });
   if (outcome.note) console.warn(`Webhook ${event.id} de Mercado Pago: ${outcome.note}`);
 
-  // 4. Email de confirmación, después de responder: si falla no afecta al pago ya registrado
-  const { confirmedAppointmentId } = outcome;
-  if (confirmedAppointmentId) after(() => sendConfirmationEmail(confirmedAppointmentId));
+  // 4. Emails (confirmación o aviso al admin), después de responder: si fallan no afectan al pago
+  after(() => notifySyncOutcome(outcome));
 
   return new Response(null, { status: 200 });
 }
