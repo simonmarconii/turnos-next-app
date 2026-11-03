@@ -26,12 +26,12 @@ export function AuthNav() {
     <nav className="flex items-center gap-2 sm:gap-4">
       <Show when="signed-out">
         <SignInButton>
-          <button className="h-10 rounded-full px-3 text-sm font-semibold text-foreground hover:bg-soft sm:px-4">
+          <button className="h-10 rounded-full px-3 text-sm font-semibold text-foreground hover:bg-soft hover:cursor-pointer sm:px-4">
             Iniciar sesión
           </button>
         </SignInButton>
         <SignUpButton>
-          <button className="h-10 rounded-full border border-primary px-3 text-sm font-semibold text-primary hover:bg-soft sm:px-4">
+          <button className="h-10 rounded-full border border-primary px-3 text-sm font-semibold text-primary hover:bg-soft hover:cursor-pointer sm:px-4">
             Registrarse
           </button>
         </SignUpButton>
