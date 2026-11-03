@@ -153,7 +153,7 @@ export default function Home() {
               <span className="flex flex-col">
                 <span className="text-sm text-muted">WhatsApp</span>
                 <span className="font-semibold text-foreground">
-                  {siteConfig.whatsappDisplay}
+                  Dudas y consultas
                 </span>
               </span>
             </a>
