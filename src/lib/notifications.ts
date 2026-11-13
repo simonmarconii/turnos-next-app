@@ -35,18 +35,24 @@ function loadAppointment(appointmentId: string) {
 
 type FullAppointment = NonNullable<Awaited<ReturnType<typeof loadAppointment>>>;
 
+// Un envío por destinatario: si una dirección es inválida (o Resend la rechaza), no se pierde el
+// email de los demás, y los admins no ven las direcciones de los otros.
 async function send(to: string | string[], content: EmailContent) {
-  if (Array.isArray(to) && to.length === 0) return;
+  const recipients = Array.isArray(to) ? to : [to];
   const { subject, preview, ...props } = content;
-  try {
-    await sendEmail({
-      to,
-      subject,
-      react: EmailTemplate({ ...props, preview: preview ?? subject }),
-    });
-  } catch (error) {
-    console.error(`No se pudo enviar el email "${subject}"`, error);
-  }
+  await Promise.all(
+    recipients.map(async (recipient) => {
+      try {
+        await sendEmail({
+          to: recipient,
+          subject,
+          react: EmailTemplate({ ...props, preview: preview ?? subject }),
+        });
+      } catch (error) {
+        console.error(`No se pudo enviar el email "${subject}" a ${recipient}`, error);
+      }
+    }),
+  );
 }
 
 async function adminEmails() {
