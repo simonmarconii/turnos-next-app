@@ -6,7 +6,7 @@ const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/reservar(.*)", // Wizard de reserva: se puede reservar como invitado
-  "/api/webhooks(.*)", // Mercado Pago y Clerk: se autentican con su firma, no con sesión
+  "/api/webhooks(.*)", // Mercado Pago: se autentican con su firma, no con sesión
 ]);
 
 export default clerkMiddleware(async (auth, req) => {
